@@ -4,6 +4,7 @@ import (
 	"context"
 	"myapp/database"
 	"myapp/models"
+	"myapp/utils"
 	"net/http"
 	"time"
 
@@ -24,7 +25,6 @@ func HashPassword(password string) (string, error) {
 	return string(HashPassword), nil
 
 }
-
 
 var userCollection *mongo.Collection = database.OpenCollection("users")
 
@@ -78,5 +78,79 @@ func RegisterUser()  gin.HandlerFunc{
 		}
 
 		c.JSON(http.StatusCreated, result)
+	}
+}
+
+func LoginUser()  gin.HandlerFunc{
+	return func (c *gin.Context){
+		var userLogin models.UserLogin
+	
+		if err := c.ShouldBindJSON(&userLogin); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		var ctx, cancel = context.WithTimeout(c, 100*time.Second)
+		defer cancel()
+
+		var user models.User
+
+		err := userCollection.FindOne(ctx, bson.M{"email": userLogin.Email}).Decode(&user)
+
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find user"})
+			return
+		}
+
+		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(userLogin.Password)); err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
+			return
+		}
+
+		token, refreshToken, err := utils.GenerateAllTokens(user.Email, user.FirstName, user.LastName, user.Role, user.UserID)
+
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate tokens"})
+			return
+		}
+
+		err = utils.UpdateAllTokens(user.UserID, token, refreshToken)
+
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update tokens"})
+			return
+		}
+
+		http.SetCookie(c.Writer, &http.Cookie{
+			Name:  "access_token",
+			Value: token,
+			Path:  "/",
+			// Domain:   "localhost",
+			MaxAge:   86400,
+			Secure:   true,
+			HttpOnly: true,
+			SameSite: http.SameSiteNoneMode,
+		})
+		http.SetCookie(c.Writer, &http.Cookie{
+			Name:  "refresh_token",
+			Value: refreshToken,
+			Path:  "/",
+			// Domain:   "localhost",
+			MaxAge:   604800,
+			Secure:   true,
+			HttpOnly: true,
+			SameSite: http.SameSiteNoneMode,
+		})
+
+		c.JSON(http.StatusOK, models.UserResponse{
+			UserId:    user.UserID,
+			FirstName: user.FirstName,
+			LastName:  user.LastName,
+			Email:     user.Email,
+			Role:      user.Role,
+			//Token:           token,
+			//RefreshToken:    refreshToken,
+			FavouriteGenres: user.FavouriteGenres,
+		})
 	}
 }

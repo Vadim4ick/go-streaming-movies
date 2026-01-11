@@ -15,6 +15,7 @@ func main() {
   r.POST("/movies", controllers.AddMovie())
   
   r.POST("/register", controllers.RegisterUser())
+  r.POST("/login", controllers.LoginUser())
   
   if err := r.Run(":8080"); err != nil {
 	fmt.Println("Failed to start server", err)
